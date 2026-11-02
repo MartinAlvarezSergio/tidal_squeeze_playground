@@ -1,0 +1,16 @@
+/* Tidal squeeze: the orbit count in the top bar, and the hint under the resonance switch. */
+
+.tidal-squeeze .ts-toolbar-orbits {
+  padding: 0 6px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: rgba(240, 238, 234, 0.9);
+}
+
+.tidal-squeeze .ts-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: rgba(240, 238, 234, 0.7);
+}
