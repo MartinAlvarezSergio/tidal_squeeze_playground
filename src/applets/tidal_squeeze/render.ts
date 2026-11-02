@@ -10,8 +10,9 @@ const CY = 385;
 const ORBIT_PX = 125;
 const PARTNER_PX = 195;
 const THIRD_PX = 262;
+const INNER_PX = 64;
 /** Real eccentricities are tiny; the drawing stretches them this much so the oval shows. */
-export const E_DRAWN = 60;
+export const E_DRAWN = 34;
 
 const INK = "rgba(235, 232, 226, 0.92)";
 const MUTED = "rgba(235, 232, 226, 0.6)";
@@ -54,6 +55,7 @@ export type SystemView = {
   angle: number;
   partnerAngle: number;
   thirdAngle: number;
+  innerAngle: number;
   /** Heating relative to today's, 0–1. */
   heat: number;
   /** Where and how recently the partner last tugged: angle (radians) and seconds ago. */
@@ -83,7 +85,7 @@ export function renderSystem(ctx: CanvasRenderingContext2D, v: SystemView): void
   ctx.beginPath();
   ctx.ellipse(CX - a * e, CY, a, b, 0, 0, Math.PI * 2);
   ctx.stroke();
-  for (const r of [PARTNER_PX, ...(v.moon.third ? [THIRD_PX] : [])]) {
+  for (const r of [PARTNER_PX, ...(v.moon.third ? [THIRD_PX] : []), ...(v.moon.inner ? [INNER_PX] : [])]) {
     ctx.strokeStyle = "rgba(200, 215, 255, 0.22)";
     ctx.beginPath();
     ctx.arc(CX, CY, r, 0, Math.PI * 2);
@@ -135,6 +137,14 @@ export function renderSystem(ctx: CanvasRenderingContext2D, v: SystemView): void
     ctx.fill();
     text(ctx, v.moon.third.name, third.x, third.y + 18, MUTED, 12);
   }
+  if (v.moon.inner) {
+    const inner = pos(INNER_PX, v.innerAngle);
+    ctx.fillStyle = "#e8d48a";
+    ctx.beginPath();
+    ctx.arc(inner.x, inner.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    text(ctx, v.moon.inner.name, inner.x, inner.y + 15, MUTED, 11);
+  }
 
   // The moon itself, measured from the orbit's focus: the planet.
   const m = pos(v.r * a, v.angle);
@@ -181,12 +191,11 @@ export function renderClose(ctx: CanvasRenderingContext2D, v: CloseView): void {
   ctx.arc(cx, cy, R * 1.6, 0, Math.PI * 2);
   ctx.fill();
   // The unstretched outline goes underneath, so it only shows where the moon is squashed.
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.45)";
-  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
+  ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.arc(cx, cy, R, 0, Math.PI * 2);
   ctx.stroke();
-  ctx.setLineDash([]);
   ctx.fillStyle = heatColour(v.heat);
   ctx.beginPath();
   ctx.ellipse(cx, cy, R * (1 + stretch), R * (1 - stretch / 2), 0, 0, Math.PI * 2);
@@ -198,7 +207,7 @@ export function renderClose(ctx: CanvasRenderingContext2D, v: CloseView): void {
   const right = CLOSE_W - 8;
   const top = 50;
   const bottom = 170;
-  const span = 0.02;
+  const span = 0.03;
   text(ctx, "Bulge size", left, 42 - 4, INK, 11, "left");
   ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
   ctx.lineWidth = 1;
@@ -206,8 +215,8 @@ export function renderClose(ctx: CanvasRenderingContext2D, v: CloseView): void {
   ctx.moveTo(left, (top + bottom) / 2);
   ctx.lineTo(right, (top + bottom) / 2);
   ctx.stroke();
-  text(ctx, "+2%", left - 2, top, MUTED, 9, "right", 500);
-  text(ctx, "−2%", left - 2, bottom, MUTED, 9, "right", 500);
+  text(ctx, "+3%", left - 2, top, MUTED, 9, "right", 500);
+  text(ctx, "−3%", left - 2, bottom, MUTED, 9, "right", 500);
   ctx.strokeStyle = "#ffb36b";
   ctx.lineWidth = 1.8;
   ctx.beginPath();

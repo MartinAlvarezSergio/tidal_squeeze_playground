@@ -6,7 +6,8 @@ Live: https://martinalvarezsergio.github.io/tidal_squeeze_playground/
 
 A moon on a slightly oval orbit is stretched more when it is close to its planet and less when it
 is far, so its tidal bulge grows and shrinks every orbit, and that flexing heats it. Pick **Io**
-(kept oval by its resonance with Europa and Ganymede) or **Enceladus** (kept oval by Dione). Watch
+(kept oval by its resonance with Europa and Ganymede), **Europa** (kept oval by Ganymede, with Io
+inside it) or **Enceladus** (kept oval by Dione). Watch
 the bulge pulse in the close-up and the moon glow. Then switch the resonance off: tides round the
 orbit out and the heating fades away.
 

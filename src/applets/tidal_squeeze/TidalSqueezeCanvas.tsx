@@ -24,7 +24,7 @@ type Props = {
 const TIP = {
   play: "Run or pause the orbits.",
   reset: "Back to the start, resonance on.",
-  moon: "Io, kept oval by Europa and Ganymede; or Enceladus, kept oval by Dione.",
+  moon: "Io, kept oval by Europa and Ganymede; Europa, kept oval by Ganymede (with Io inside it); or Enceladus, kept oval by Dione.",
   resonance: "On: the outer moon takes exactly two of the inner moon's orbits to go round once, so it always tugs at the same point and keeps the orbit oval. Off: its tugs land all over the place and cancel out, and tides round the orbit off.",
   hero: "Heat made by flexing, in watts. It grows with the square of the orbit's oval-ness.",
   flow: "The same heat spread over the whole surface, per square metre, next to Earth's internal heat flow.",
@@ -64,7 +64,7 @@ export function TidalSqueezeCanvas({ host }: Props): JSX.Element {
   const moon = MOONS.find((m) => m.id === moonId) ?? MOONS[0];
   const live = useRef({ moon, resonance, running });
   live.current = { moon, resonance, running };
-  const state = useRef({ p: 0, e: MOONS[0].forcedE, partner: 0, third: 0, tug: null as { angle: number; age: number } | null, history: [] as number[] });
+  const state = useRef({ p: 0, e: MOONS[0].forcedE, partner: 0, third: 0, inner: 0, tug: null as { angle: number; age: number } | null, history: [] as number[] });
 
   useEffect(() => {
     const ctx = sceneRef.current?.getContext("2d");
@@ -90,6 +90,7 @@ export function TidalSqueezeCanvas({ host }: Props): JSX.Element {
         const prevGap = Math.sin(angleAt(0, before) - st.partner);
         st.partner += (2 * Math.PI * dp) / ratio;
         st.third += (2 * Math.PI * dp) / (s.resonance ? s.moon.third?.ratio ?? 4 : 5.5);
+        st.inner += (2 * Math.PI * dp) / (s.resonance ? s.moon.inner?.ratio ?? 0.5 : 0.43);
         if (s.resonance) {
           // Conjunctions fall at the inner moon's closest point, every other orbit.
           if (Math.floor(st.p / 2) !== Math.floor(before / 2)) {
@@ -120,6 +121,7 @@ export function TidalSqueezeCanvas({ host }: Props): JSX.Element {
         angle: angleAt(eDrawn, st.p),
         partnerAngle: st.partner,
         thirdAngle: st.third,
+        innerAngle: st.inner,
         heat,
         tug: st.tug,
         resonance: s.resonance,
@@ -143,7 +145,7 @@ export function TidalSqueezeCanvas({ host }: Props): JSX.Element {
 
   function restart(id = moonId): void {
     const m = MOONS.find((q) => q.id === id) ?? MOONS[0];
-    state.current = { p: 0, e: m.forcedE, partner: 0, third: 0, tug: null, history: [] };
+    state.current = { p: 0, e: m.forcedE, partner: 0, third: 0, inner: 0, tug: null, history: [] };
     setE(m.forcedE);
   }
 
@@ -219,7 +221,7 @@ export function TidalSqueezeCanvas({ host }: Props): JSX.Element {
     <>
       <h4>What you are seeing</h4>
       <ul>
-        <li>{moon.name} going round {moon.planet}, with {moon.partner}{moon.third ? ` and ${moon.third.name}` : ""} farther out. Its orbit is very slightly oval; the drawing stretches the oval {E_DRAWN} times so you can see it.</li>
+        <li>{moon.name} going round {moon.planet}, with {moon.partner}{moon.third ? ` and ${moon.third.name}` : ""} farther out{moon.inner ? `, and ${moon.inner.name} closer in` : ""}. Its orbit is very slightly oval; the drawing stretches the oval {E_DRAWN} times so you can see it.</li>
         <li>{moon.planet}'s gravity pulls harder on {moon.name}'s near side than its far side, stretching it into a slight rugby-ball shape: the tidal bulge.</li>
         <li>Bottom right: {moon.name} close up, and the size of its bulge over time.</li>
       </ul>
@@ -228,17 +230,19 @@ export function TidalSqueezeCanvas({ host }: Props): JSX.Element {
         <li>Close to the planet the stretch is strongest; far away, weakest. On an oval orbit the bulge grows and shrinks every orbit, flexing the moon's insides like a squeezed stress ball. Friction turns that flexing into heat.</li>
         <li>Left alone, the flexing would round the orbit off, and the heating would stop.</li>
         <li>The resonance stops that: {moon.partner} goes round exactly once for every two orbits of {moon.name}, so its tug always lands at the same point and keeps pushing the orbit back into an oval.</li>
-        <li>Io's surface rises and falls by about 100 metres every 42 hours. Its heat drives the most volcanic world in the Solar System; Enceladus's keeps an ocean liquid under its ice and feeds the geysers at its south pole.</li>
+        <li>Io's surface rises and falls by about 100 metres every 42 hours. Its heat drives the most volcanic world in the Solar System.</li>
+        <li>Europa gets far less heat than Io, but enough, with the warmth of its rocky core, to keep a salty ocean liquid under its ice. Ganymede and Io keep its orbit oval together: Io goes round four times for every two orbits of Europa and one of Ganymede.</li>
+        <li>Enceladus's heat keeps an ocean liquid under its ice and feeds the geysers at its south pole.</li>
       </ul>
       <h4>Try</h4>
       <ul>
         <li>Switch the resonance off. What happens to the oval, the bulge and the heat?</li>
-        <li>Compare Io and Enceladus. Which gives out more heat in all, and why might that be?</li>
+        <li>Compare the three moons. Which gives out the most heat in all? Europa's orbit is the most oval, so why does it get less heat than Io?</li>
         <li>Why could a moon far from the Sun's habitable zone still have liquid water?</li>
       </ul>
       <h4>Simplified on purpose</h4>
       <ul>
-        <li>Heat today is taken from measurements (Io about 10¹⁴ W; Enceladus about 16 GW, from Cassini) and scaled with the square of the eccentricity, as tidal heating theory gives.</li>
+        <li>Heat today is taken from measurements (Io about 10¹⁴ W; Enceladus about 16 GW, from Cassini) and scaled with the square of the eccentricity, as tidal heating theory gives. Europa's has never been measured: its 10¹² W is a typical model estimate, and some models give ten times less.</li>
         <li>Rounding off the orbit, or pumping it back up, takes a few seconds here. In reality it would take a very long time.</li>
         <li>Orbits of the outer moons are drawn as circles and not to scale. The bulge is shown pointing straight at the planet; in reality it also rocks a little from side to side.</li>
       </ul>

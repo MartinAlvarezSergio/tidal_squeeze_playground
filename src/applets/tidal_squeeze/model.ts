@@ -14,6 +14,8 @@ export type Moon = {
   ratio: number;
   /** A third moon in the chain, if any, with its period ratio to the moon. */
   third?: { name: string; ratio: number };
+  /** A moon in the chain inside this one's orbit, if any, with its period ratio to the moon. */
+  inner?: { name: string; ratio: number };
   /** Eccentricity the resonance keeps up. */
   forcedE: number;
   /** Heat given out today (W), with the orbit at its forced eccentricity. */
@@ -35,6 +37,19 @@ export const MOONS: Moon[] = [
     heat: 1e14,
     radiusKm: 1821.6,
     periodDays: 1.769
+  },
+  {
+    id: "europa",
+    name: "Europa",
+    planet: "Jupiter",
+    partner: "Ganymede",
+    ratio: 2,
+    inner: { name: "Io", ratio: 0.5 },
+    forcedE: 0.0094,
+    // Never measured: models of its ice shell and rocky interior give roughly 10¹¹–10¹² W.
+    heat: 1e12,
+    radiusKm: 1560.8,
+    periodDays: 3.551
   },
   {
     id: "enceladus",
