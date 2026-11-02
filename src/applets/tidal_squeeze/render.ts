@@ -1,4 +1,4 @@
-import { bulgeAt, type Moon } from "./model";
+import { bulgeAt, TUGS_REMEMBERED, type Moon } from "./model";
 
 export const VIEW_W = 1280;
 export const VIEW_H = 720;
@@ -7,8 +7,7 @@ export const CLOSE_H = 200;
 
 const CX = 645;
 const CY = 385;
-const ORBIT_PX = 125;
-const PARTNER_PX = 195;
+export const ORBIT_PX = 125;
 const THIRD_PX = 262;
 const INNER_PX = 64;
 /** Real eccentricities are tiny; the drawing stretches them this much so the oval shows. */
@@ -37,6 +36,11 @@ function text(ctx: CanvasRenderingContext2D, s: string, x: number, y: number, co
   ctx.fillText(s, x, y);
 }
 
+/** How brightly a moon glows for a given heat flow (W/m²), 0–1: Io's 2.4 near full, Europa's a third. */
+export function glowFor(flow: number): number {
+  return flow <= 0 ? 0 : Math.max(0, Math.min(1, (Math.log10(flow) + 2.5) / 3));
+}
+
 /** Cool rock to glowing orange as the heating rises (0–1). */
 function heatColour(h: number): string {
   const t = Math.max(0, Math.min(1, h));
@@ -48,19 +52,25 @@ function heatColour(h: number): string {
 
 export type SystemView = {
   moon: Moon;
-  /** Drawn eccentricity. */
+  /** Drawn eccentricity, and how many times the real one is stretched to get it. */
   eDrawn: number;
+  stretch: number;
+  /** Radius (px) of the moon's average orbit, and of the partner's (null: no partner drawn). */
+  orbitPx: number;
+  partnerPx: number | null;
   /** Moon's position: distance (units of its average) and angle (radians from the closest point). */
   r: number;
   angle: number;
   partnerAngle: number;
   thirdAngle: number;
   innerAngle: number;
-  /** Heating relative to today's, 0–1. */
+  /** Glow, 0–1 (from glowFor). */
   heat: number;
   /** Where and how recently the partner last tugged: angle (radians) and seconds ago. */
   tug: { angle: number; age: number } | null;
-  resonance: boolean;
+  /** Where each tug lands relative to the last, and how well the tugs line up (0–1). */
+  drift: number;
+  lineUp: number;
   clock: number;
 };
 
@@ -78,14 +88,14 @@ export function renderSystem(ctx: CanvasRenderingContext2D, v: SystemView): void
 
   // Orbits: the moon's oval (exaggerated), its partners' circles.
   const e = v.eDrawn;
-  const a = ORBIT_PX;
+  const a = v.orbitPx;
   const b = a * Math.sqrt(1 - e * e);
   ctx.strokeStyle = "rgba(255, 200, 150, 0.45)";
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   ctx.ellipse(CX - a * e, CY, a, b, 0, 0, Math.PI * 2);
   ctx.stroke();
-  for (const r of [PARTNER_PX, ...(v.moon.third ? [THIRD_PX] : []), ...(v.moon.inner ? [INNER_PX] : [])]) {
+  for (const r of [...(v.partnerPx ? [v.partnerPx] : []), ...(v.moon.third ? [THIRD_PX] : []), ...(v.moon.inner ? [INNER_PX] : [])]) {
     ctx.strokeStyle = "rgba(200, 215, 255, 0.22)";
     ctx.beginPath();
     ctx.arc(CX, CY, r, 0, Math.PI * 2);
@@ -109,26 +119,41 @@ export function renderSystem(ctx: CanvasRenderingContext2D, v: SystemView): void
 
   const pos = (r: number, ang: number): { x: number; y: number } => ({ x: CX + r * Math.cos(ang), y: CY - r * Math.sin(ang) });
 
-  // The partner's tug: a flash along the line between them, fading.
-  if (v.tug && v.tug.age < 0.9) {
-    const alpha = 1 - v.tug.age / 0.9;
-    const from = pos(PARTNER_PX, v.tug.angle);
-    const to = pos(ORBIT_PX, v.tug.angle);
-    ctx.strokeStyle = `rgba(255, 211, 107, ${alpha})`;
-    ctx.lineWidth = 3;
+  if (v.partnerPx) {
+    const pp = v.partnerPx;
+    // Where the last few tugs landed: piled on one spot in a resonance, spread round the orbit otherwise.
+    if (v.tug) {
+      for (let k = TUGS_REMEMBERED - 1; k >= 0; k -= 1) {
+        const at = pos(a * 1.16, v.tug.angle - k * v.drift);
+        ctx.fillStyle = `rgba(255, 211, 107, ${0.9 - (0.75 * k) / TUGS_REMEMBERED})`;
+        ctx.beginPath();
+        ctx.arc(at.x, at.y, k === 0 ? 5 : 3.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // The partner's tug: a flash along the line between them, fading.
+    if (v.tug && v.tug.age < 0.9) {
+      const alpha = 1 - v.tug.age / 0.9;
+      const from = pos(pp, v.tug.angle);
+      const to = pos(a, v.tug.angle);
+      ctx.strokeStyle = `rgba(255, 211, 107, ${alpha})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
+    }
+    if (v.tug) {
+      const label = v.lineUp > 0.8 ? `${v.moon.partner}'s tugs: same spot every time` : v.lineUp > 0.4 ? `${v.moon.partner}'s tugs: creeping round` : `${v.moon.partner}'s tugs: all over the place`;
+      text(ctx, label, 362, VIEW_H - 54, TUG, 14, "left");
+    }
+    const partner = pos(pp, v.partnerAngle);
+    ctx.fillStyle = "#cfd8ff";
     ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
-    ctx.stroke();
-    text(ctx, v.resonance ? `${v.moon.partner}'s tug: same spot every time` : `${v.moon.partner}'s tug: somewhere new each time`, from.x + 12, from.y - 16, TUG, 12, "left");
+    ctx.arc(partner.x, partner.y, 8, 0, Math.PI * 2);
+    ctx.fill();
+    text(ctx, v.moon.partner, partner.x, partner.y + 18, MUTED, 12);
   }
-
-  const partner = pos(PARTNER_PX, v.partnerAngle);
-  ctx.fillStyle = "#cfd8ff";
-  ctx.beginPath();
-  ctx.arc(partner.x, partner.y, 8, 0, Math.PI * 2);
-  ctx.fill();
-  text(ctx, v.moon.partner, partner.x, partner.y + 18, MUTED, 12);
   if (v.moon.third) {
     const third = pos(THIRD_PX, v.thirdAngle);
     ctx.fillStyle = "#b8c4dc";
@@ -161,7 +186,7 @@ export function renderSystem(ctx: CanvasRenderingContext2D, v: SystemView): void
   ctx.fill();
   text(ctx, v.moon.name, m.x, m.y - 20, INK, 14);
 
-  text(ctx, `Orbits drawn round; ${v.moon.name}'s oval stretched ${E_DRAWN}× so you can see it.`, 362, VIEW_H - 28, MUTED, 12, "left", 500);
+  text(ctx, v.stretch > 1 ? `Not to scale; ${v.moon.name}'s oval stretched ${Math.round(v.stretch)}× so you can see it.` : "Not to scale.", 362, VIEW_H - 28, MUTED, 12, "left", 500);
 }
 
 export type CloseView = {
@@ -171,6 +196,8 @@ export type CloseView = {
   heat: number;
   /** Bulge size relative to average over recent time, oldest first (real values). */
   history: number[];
+  /** The chart runs from −span to +span (fraction of the average). */
+  span: number;
 };
 
 export function renderClose(ctx: CanvasRenderingContext2D, v: CloseView): void {
@@ -207,7 +234,7 @@ export function renderClose(ctx: CanvasRenderingContext2D, v: CloseView): void {
   const right = CLOSE_W - 8;
   const top = 50;
   const bottom = 170;
-  const span = 0.03;
+  const span = v.span;
   text(ctx, "Bulge size", left, 42 - 4, INK, 11, "left");
   ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
   ctx.lineWidth = 1;
@@ -215,8 +242,8 @@ export function renderClose(ctx: CanvasRenderingContext2D, v: CloseView): void {
   ctx.moveTo(left, (top + bottom) / 2);
   ctx.lineTo(right, (top + bottom) / 2);
   ctx.stroke();
-  text(ctx, "+3%", left - 2, top, MUTED, 9, "right", 500);
-  text(ctx, "−3%", left - 2, bottom, MUTED, 9, "right", 500);
+  text(ctx, `+${Math.round(span * 100)}%`, left - 2, top, MUTED, 9, "right", 500);
+  text(ctx, `−${Math.round(span * 100)}%`, left - 2, bottom, MUTED, 9, "right", 500);
   ctx.strokeStyle = "#ffb36b";
   ctx.lineWidth = 1.8;
   ctx.beginPath();

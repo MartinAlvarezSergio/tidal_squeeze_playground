@@ -5,11 +5,14 @@ Standalone GitHub Pages build of the tidal-heating applet from [physics_demos](h
 Live: https://martinalvarezsergio.github.io/tidal_squeeze_playground/
 
 A moon on a slightly oval orbit is stretched more when it is close to its planet and less when it
-is far, so its tidal bulge grows and shrinks every orbit, and that flexing heats it. Pick **Io**
-(kept oval by its resonance with Europa and Ganymede), **Europa** (kept oval by Ganymede, with Io
-inside it) or **Enceladus** (kept oval by Dione). Watch
-the bulge pulse in the close-up and the moon glow. Then switch the resonance off: tides round the
-orbit out and the heating fades away.
+is far, so its tidal bulge grows and shrinks every orbit, and that flexing heats it. Pick **Io**,
+**Europa** or **Enceladus**:
+
+- **Find the rhythm**: slide the outer moon's period off the real 2:1 and watch where its tugs
+  land. Only when they pile up on one spot do they keep the orbit oval and the moon hot. There is
+  a second rhythm that works too.
+- **Design your own moon**: set its distance from Jupiter and how oval its orbit is, see whether
+  it gets volcanoes, a hidden ocean or freezes through, and tick off the goals.
 
 ```bash
 npm install

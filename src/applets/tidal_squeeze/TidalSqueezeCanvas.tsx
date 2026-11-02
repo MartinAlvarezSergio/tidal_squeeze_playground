@@ -7,14 +7,35 @@ import {
   StageDivider,
   StageHero,
   StageIconButton,
+  StagePillButton,
   StagePills,
   StageReadout,
   StageSection,
   StageSegmented,
-  StageToggle
+  StageSlider
 } from "../../ui/stage/StageControls";
-import { angleAt, bulgeAt, bulgeSwing, distanceAt, EARTH_HEAT_FLOW, heatAt, heatFlow, MOONS, relax } from "./model";
-import { CLOSE_H, CLOSE_W, E_DRAWN, renderClose, renderSystem, VIEW_H, VIEW_W } from "./render";
+import {
+  angleAt,
+  bulgeAt,
+  bulgeSwing,
+  distanceAt,
+  EARTH_HEAT_FLOW,
+  heatAt,
+  heatFlow,
+  insideAt,
+  IO_DISTANCE_KM,
+  MOONS,
+  relax,
+  resonanceName,
+  tugDrift,
+  tugsLineUp,
+  TUGS_REMEMBERED,
+  yourMoonFlow,
+  yourMoonHeat,
+  type Inside,
+  type Moon
+} from "./model";
+import { CLOSE_H, CLOSE_W, E_DRAWN, glowFor, ORBIT_PX, renderClose, renderSystem, VIEW_H, VIEW_W } from "./render";
 import "./tidalSqueeze.css";
 
 type Props = {
@@ -23,11 +44,14 @@ type Props = {
 
 const TIP = {
   play: "Run or pause the orbits.",
-  reset: "Back to the start, resonance on.",
-  moon: "Io, kept oval by Europa and Ganymede; Europa, kept oval by Ganymede (with Io inside it); or Enceladus, kept oval by Dione.",
-  resonance: "On: the outer moon takes exactly two of the inner moon's orbits to go round once, so it always tugs at the same point and keeps the orbit oval. Off: its tugs land all over the place and cancel out, and tides round the orbit off.",
+  reset: "Back to the start: the real rhythm, or your moon's starting orbit.",
+  moon: "A real moon (Io, Europa or Enceladus), or one you design yourself.",
+  rhythm: "How many of the inner moon's orbits the outer moon takes to go round once. Really, it is exactly 2: a 2:1 resonance.",
+  distance: "How far your moon is from Jupiter, in units of Io's distance. Europa is at 1.6, Ganymede at 2.5.",
+  yourE: "How oval your moon's orbit is: 0 is a circle. A resonance with another moon would keep it this oval.",
   hero: "Heat made by flexing, in watts. It grows with the square of the orbit's oval-ness.",
   flow: "The same heat spread over the whole surface, per square metre, next to Earth's internal heat flow.",
+  inside: "Roughly what that much heat does to the moon's insides.",
   e: "How oval the orbit is: 0 is a circle. These are real values; the drawing stretches them.",
   swing: "How much the tidal bulge grows and shrinks each orbit, as a share of its average size.",
   partner: "Which moon keeps the orbit oval, and how."
@@ -37,9 +61,31 @@ const TIP = {
 const ORBIT_SECONDS = 3.5;
 /** Animated time (s) for the orbit to round off, or to be pumped back up: far faster than in reality. */
 const RELAX_SECONDS = 6;
-/** Without the resonance, the outer moon's period is no longer a whole multiple of the inner one's. */
-const OFF_RATIO = 2.37;
 const HISTORY = 240;
+const REAL_RATIO = 2;
+const YOURS = "yours";
+const START_DISTANCE = 1.6;
+const START_E = 0.004;
+
+const INSIDE: Record<Inside, { label: string; colour: string }> = {
+  volcanoes: { label: "Volcanoes", colour: "#ff8a5c" },
+  ocean: { label: "Hidden ocean", colour: "#6fb3ff" },
+  frozen: { label: "Frozen through", colour: "#cfd8ff" }
+};
+
+type Goal = { id: string; label: string; met: (distance: number, e: number, inside: Inside) => boolean };
+
+const GOALS: Goal[] = [
+  { id: "volcanoes", label: "Make volcanoes, like Io", met: (_d, _e, inside) => inside === "volcanoes" },
+  { id: "far-ocean", label: "Hide an ocean beyond Ganymede (2.5 × Io's distance)", met: (d, _e, inside) => d >= 2.5 && inside === "ocean" },
+  { id: "round-volcanoes", label: "Volcanoes on an almost round orbit (e under 0.002)", met: (_d, e, inside) => e < 0.002 && inside === "volcanoes" },
+  { id: "close-frozen", label: "Freeze a moon as close as Io", met: (d, _e, inside) => d <= 1 && inside === "frozen" }
+];
+
+function yourMoon(e: number): Moon {
+  const io = MOONS[0];
+  return { ...io, id: YOURS, name: "Your moon", partner: "", third: undefined, inner: undefined, forcedE: e };
+}
 
 function fmtWatts(w: number): string {
   if (w <= 0) return "none";
@@ -48,23 +94,32 @@ function fmtWatts(w: number): string {
   return `${(w / 10 ** p).toFixed(1)} × 10${sup} W`;
 }
 
+function freshState(e: number) {
+  // The first tug is placed at the closest point so the trail of tug marks shows from the start.
+  return { p: 0, e, partner: 0, third: 0, inner: 0, tug: { angle: 0, age: 99 } as { angle: number; age: number }, history: [] as number[] };
+}
+
 export function TidalSqueezeCanvas({ host }: Props): JSX.Element {
   const sceneRef = useRef<HTMLCanvasElement | null>(null);
   const closeRef = useRef<HTMLCanvasElement | null>(null);
   const reducedMotion = host?.readReducedMotion?.() ?? false;
 
   const [moonId, setMoonId] = useState(MOONS[0].id);
-  const [resonance, setResonance] = useState(true);
+  const [ratio, setRatio] = useState(REAL_RATIO);
+  const [distance, setDistance] = useState(START_DISTANCE);
+  const [yourE, setYourE] = useState(START_E);
+  const [goalsMet, setGoalsMet] = useState<string[]>([]);
   const [running, setRunning] = useState(true);
   const [e, setE] = useState(MOONS[0].forcedE);
   const [orbits, setOrbits] = useState(0);
 
   useCanvasBackingStore([closeRef]);
 
-  const moon = MOONS.find((m) => m.id === moonId) ?? MOONS[0];
-  const live = useRef({ moon, resonance, running });
-  live.current = { moon, resonance, running };
-  const state = useRef({ p: 0, e: MOONS[0].forcedE, partner: 0, third: 0, inner: 0, tug: null as { angle: number; age: number } | null, history: [] as number[] });
+  const isYours = moonId === YOURS;
+  const moon = isYours ? yourMoon(yourE) : MOONS.find((m) => m.id === moonId) ?? MOONS[0];
+  const live = useRef({ moon, isYours, ratio, distance, yourE, running });
+  live.current = { moon, isYours, ratio, distance, yourE, running };
+  const state = useRef(freshState(MOONS[0].forcedE));
 
   useEffect(() => {
     const ctx = sceneRef.current?.getContext("2d");
@@ -83,54 +138,59 @@ export function TidalSqueezeCanvas({ host }: Props): JSX.Element {
       const st = state.current;
       if (s.running) {
         const dp = (dt / ORBIT_SECONDS) * (reducedMotion ? 0.5 : 1);
-        const before = st.p;
+        const before = 2 * Math.PI * st.p - st.partner;
         st.p += dp;
-        st.e = relax(st.e, s.resonance ? s.moon.forcedE : 0, dt, RELAX_SECONDS);
-        const ratio = s.resonance ? s.moon.ratio : OFF_RATIO;
-        const prevGap = Math.sin(angleAt(0, before) - st.partner);
-        st.partner += (2 * Math.PI * dp) / ratio;
-        st.third += (2 * Math.PI * dp) / (s.resonance ? s.moon.third?.ratio ?? 4 : 5.5);
-        st.inner += (2 * Math.PI * dp) / (s.resonance ? s.moon.inner?.ratio ?? 0.5 : 0.43);
-        if (s.resonance) {
-          // Conjunctions fall at the inner moon's closest point, every other orbit.
-          if (Math.floor(st.p / 2) !== Math.floor(before / 2)) {
-            st.partner = 2 * Math.PI * Math.round(st.partner / (2 * Math.PI));
-            st.tug = { angle: 0, age: 0 };
-          }
+        if (s.isYours) {
+          st.e = s.yourE;
         } else {
-          const gap = Math.sin(2 * Math.PI * st.p - st.partner);
-          if (prevGap > 0 && gap <= 0 && Math.cos(2 * Math.PI * st.p - st.partner) > 0) {
+          // The tugs keep the orbit oval only as far as they keep landing on the same spot.
+          st.e = relax(st.e, s.moon.forcedE * tugsLineUp(s.ratio) ** 2, dt, RELAX_SECONDS);
+          st.partner += (2 * Math.PI * dp) / s.ratio;
+          st.third += (2 * Math.PI * dp) / (2 * s.ratio);
+          st.inner += (2 * Math.PI * dp) / (s.moon.inner?.ratio ?? 0.5);
+          // A tug each time the moon catches up with its partner and they line up.
+          const after = 2 * Math.PI * st.p - st.partner;
+          if (Math.floor(after / (2 * Math.PI)) !== Math.floor(before / (2 * Math.PI))) {
             st.tug = { angle: st.partner, age: 0 };
           }
         }
-        if (st.tug) {
-          st.tug.age += dt;
-        }
+        st.tug.age += dt;
         st.history.push(bulgeAt(distanceAt(st.e, st.p)));
         if (st.history.length > HISTORY) {
           st.history.shift();
         }
       }
       const eDrawn = Math.min(0.32, st.e * E_DRAWN);
-      const heat = heatAt(s.moon, st.e) / s.moon.heat;
+      const flow = s.isYours ? yourMoonFlow(s.distance, st.e) : heatFlow(s.moon, st.e);
+      const glow = glowFor(flow);
       setLogicalTransform(ctx, VIEW_W);
       renderSystem(ctx, {
         moon: s.moon,
         eDrawn,
+        stretch: st.e > 0 ? eDrawn / st.e : 1,
+        orbitPx: s.isYours ? ORBIT_PX * Math.sqrt(s.distance) : ORBIT_PX,
+        partnerPx: s.isYours ? null : ORBIT_PX * s.ratio ** (2 / 3),
         r: distanceAt(eDrawn, st.p),
         angle: angleAt(eDrawn, st.p),
         partnerAngle: st.partner,
         thirdAngle: st.third,
         innerAngle: st.inner,
-        heat,
-        tug: st.tug,
-        resonance: s.resonance,
+        heat: glow,
+        tug: s.isYours ? null : st.tug,
+        drift: tugDrift(s.ratio),
+        lineUp: tugsLineUp(s.ratio),
         clock
       });
       const cctx = closeRef.current?.getContext("2d");
       if (cctx) {
         setLogicalTransform(cctx, CLOSE_W);
-        renderClose(cctx, { moon: s.moon, rDrawn: distanceAt(eDrawn, st.p), heat, history: st.history });
+        renderClose(cctx, {
+          moon: s.moon,
+          rDrawn: distanceAt(eDrawn, st.p),
+          heat: glow,
+          history: st.history,
+          span: bulgeSwing(st.e) > 0.028 ? 0.07 : 0.03
+        });
       }
       if (now - lastUi > 150) {
         lastUi = now;
@@ -143,10 +203,26 @@ export function TidalSqueezeCanvas({ host }: Props): JSX.Element {
     return () => cancelAnimationFrame(raf);
   }, [reducedMotion]);
 
+  const flow = isYours ? yourMoonFlow(distance, e) : heatFlow(moon, e);
+  const inside = insideAt(flow);
+
+  // Tick off goals as your moon meets them.
+  useEffect(() => {
+    if (!isYours) {
+      return;
+    }
+    const now = insideAt(yourMoonFlow(distance, yourE));
+    const fresh = GOALS.filter((g) => !goalsMet.includes(g.id) && g.met(distance, yourE, now));
+    if (fresh.length > 0) {
+      setGoalsMet((done) => [...done, ...fresh.map((g) => g.id)]);
+      fresh.forEach((g) => host?.onResult?.({ event: "goal", goal: g.id }));
+    }
+  }, [isYours, distance, yourE, goalsMet, host]);
+
   function restart(id = moonId): void {
-    const m = MOONS.find((q) => q.id === id) ?? MOONS[0];
-    state.current = { p: 0, e: m.forcedE, partner: 0, third: 0, inner: 0, tug: null, history: [] };
-    setE(m.forcedE);
+    const startE = id === YOURS ? START_E : (MOONS.find((q) => q.id === id) ?? MOONS[0]).forcedE;
+    state.current = freshState(startE);
+    setE(startE);
   }
 
   const toolbar = (
@@ -157,7 +233,9 @@ export function TidalSqueezeCanvas({ host }: Props): JSX.Element {
         label="Reset"
         tip={TIP.reset}
         onClick={() => {
-          setResonance(true);
+          setRatio(REAL_RATIO);
+          setDistance(START_DISTANCE);
+          setYourE(START_E);
           restart();
           setRunning(true);
         }}
@@ -169,42 +247,84 @@ export function TidalSqueezeCanvas({ host }: Props): JSX.Element {
     </>
   );
 
+  const resonance = resonanceName(ratio);
+
   const controls = (
     <>
       <StageSection title="Moon">
         <StageSegmented
           ariaLabel="Moon"
           value={moonId}
-          options={MOONS.map((m) => ({ value: m.id, label: m.name }))}
+          options={[...MOONS.map((m) => ({ value: m.id, label: m.name })), { value: YOURS, label: "Yours" }]}
           tip={TIP.moon}
           onChange={(id) => {
             setMoonId(id);
-            setResonance(true);
+            setRatio(REAL_RATIO);
             restart(id);
             host?.onResult?.({ event: "moon", moon: id });
           }}
         />
       </StageSection>
-      <StagePills>
-        <StageToggle label={`Resonance with ${moon.partner}`} tip={TIP.resonance} on={resonance} onChange={setResonance} />
-      </StagePills>
-      <p className="ts-hint">Switch the resonance off and watch the orbit round out, the bulge stop pulsing, and the heat fade. Switch it back on.</p>
+      {isYours ? (
+        <>
+          <StageSection title="Your moon">
+            <StageSlider label="Distance from Jupiter" display={`${distance.toFixed(2)} × Io's`} value={distance} min={0.5} max={3} step={0.01} tip={TIP.distance} onChange={setDistance} />
+            <StageSlider label="How oval (e)" display={yourE.toFixed(4)} value={yourE} min={0} max={0.02} step={0.0005} tip={TIP.yourE} onChange={setYourE} />
+          </StageSection>
+          <StageSection title="Goals">
+            <ul className="ts-goals">
+              {GOALS.map((g) => (
+                <li key={g.id} className={goalsMet.includes(g.id) ? "is-met" : undefined}>
+                  <span aria-hidden="true">{goalsMet.includes(g.id) ? "✓" : "○"}</span>
+                  {g.label}
+                </li>
+              ))}
+            </ul>
+          </StageSection>
+        </>
+      ) : (
+        <StageSection title="The rhythm">
+          <StageSlider
+            label={`${moon.partner} goes round once every`}
+            display={`${ratio.toFixed(2)} of ${moon.name}'s orbits`}
+            value={ratio}
+            min={1.3}
+            max={2.6}
+            step={0.01}
+            tip={TIP.rhythm}
+            onChange={setRatio}
+          />
+          <p className="ts-hint">
+            Really it is exactly 2. Slide it off 2 and watch where the tugs land, the oval and the heat. Can you find another rhythm that works?
+          </p>
+          {ratio !== REAL_RATIO && (
+            <StagePills>
+              <StagePillButton label="Back to the real 2" onClick={() => setRatio(REAL_RATIO)} />
+            </StagePills>
+          )}
+        </StageSection>
+      )}
     </>
   );
 
-  const flow = heatFlow(moon, e);
+  const heatWatts = isYours ? yourMoonHeat(distance, e) : heatAt(moon, e);
   const readouts = (
     <>
-      <StageHero label="Heat" value={fmtWatts(heatAt(moon, e))} tip={TIP.hero} />
+      <StageHero label="Heat" value={fmtWatts(heatWatts)} tip={TIP.hero} />
       <StageReadout label="Per m²" value={`${flow < 0.01 ? flow.toExponential(0) : flow.toFixed(2)} W (Earth ${EARTH_HEAT_FLOW})`} tip={TIP.flow} />
+      <StageReadout label="Inside" value={INSIDE[inside].label} valueColor={INSIDE[inside].colour} tip={TIP.inside} />
       <StageReadout label="Orbit's oval (e)" value={e.toFixed(4)} tip={TIP.e} />
       <StageReadout label="Bulge swings by" value={`±${(100 * bulgeSwing(e)).toFixed(1)}%`} tip={TIP.swing} />
-      <StageReadout
-        label="Kept oval by"
-        value={resonance ? `${moon.partner}, 2:1` : "nothing"}
-        valueColor={resonance ? "#6fe39a" : "#ff8a5c"}
-        tip={TIP.partner}
-      />
+      {isYours ? (
+        <StageReadout label="Distance" value={`${Math.round((distance * IO_DISTANCE_KM) / 1000).toLocaleString("en-US")},000 km`} tip={TIP.distance} />
+      ) : (
+        <StageReadout
+          label="Kept oval by"
+          value={resonance ? `${moon.partner}, ${resonance}` : "nothing"}
+          valueColor={resonance ? "#6fe39a" : "#ff8a5c"}
+          tip={TIP.partner}
+        />
+      )}
     </>
   );
 
@@ -221,30 +341,38 @@ export function TidalSqueezeCanvas({ host }: Props): JSX.Element {
     <>
       <h4>What you are seeing</h4>
       <ul>
-        <li>{moon.name} going round {moon.planet}, with {moon.partner}{moon.third ? ` and ${moon.third.name}` : ""} farther out{moon.inner ? `, and ${moon.inner.name} closer in` : ""}. Its orbit is very slightly oval; the drawing stretches the oval {E_DRAWN} times so you can see it.</li>
-        <li>{moon.planet}'s gravity pulls harder on {moon.name}'s near side than its far side, stretching it into a slight rugby-ball shape: the tidal bulge.</li>
-        <li>Bottom right: {moon.name} close up, and the size of its bulge over time.</li>
+        {isYours ? (
+          <li>Your own moon, the size of Io, going round Jupiter. You choose how far out it is and how oval its orbit; some other moon is assumed to keep it that oval.</li>
+        ) : (
+          <li>{moon.name} going round {moon.planet}, with {moon.partner}{moon.third ? ` and ${moon.third.name}` : ""} farther out{moon.inner ? `, and ${moon.inner.name} closer in` : ""}. Its orbit is very slightly oval; the drawing stretches the oval so you can see it.</li>
+        )}
+        <li>{moon.planet}'s gravity pulls harder on the moon's near side than its far side, stretching it into a slight rugby-ball shape: the tidal bulge.</li>
+        <li>Bottom right: the moon close up, and the size of its bulge over time.</li>
       </ul>
       <h4>Tides, then resonance, then heat</h4>
       <ul>
         <li>Close to the planet the stretch is strongest; far away, weakest. On an oval orbit the bulge grows and shrinks every orbit, flexing the moon's insides like a squeezed stress ball. Friction turns that flexing into heat.</li>
         <li>Left alone, the flexing would round the orbit off, and the heating would stop.</li>
-        <li>The resonance stops that: {moon.partner} goes round exactly once for every two orbits of {moon.name}, so its tug always lands at the same point and keeps pushing the orbit back into an oval.</li>
+        <li>A resonance stops that. The yellow marks show where the outer moon's last few tugs landed. When it goes round exactly once for every two orbits (2:1), every tug lands on the same spot and keeps pushing the orbit back into an oval, like pushing a swing at the same moment each time. With any other rhythm the tugs land all round the orbit and cancel out.</li>
+        <li>Heat falls off very fast with distance: twice as far from the planet, about 180 times less heat for the same oval.</li>
         <li>Io's surface rises and falls by about 100 metres every 42 hours. Its heat drives the most volcanic world in the Solar System.</li>
         <li>Europa gets far less heat than Io, but enough, with the warmth of its rocky core, to keep a salty ocean liquid under its ice. Ganymede and Io keep its orbit oval together: Io goes round four times for every two orbits of Europa and one of Ganymede.</li>
         <li>Enceladus's heat keeps an ocean liquid under its ice and feeds the geysers at its south pole.</li>
       </ul>
       <h4>Try</h4>
       <ul>
-        <li>Switch the resonance off. What happens to the oval, the bulge and the heat?</li>
+        <li>Slide the rhythm off 2. How far off can you go before the heat fades? Is there another rhythm where the tugs pile up again?</li>
         <li>Compare the three moons. Which gives out the most heat in all? Europa's orbit is the most oval, so why does it get less heat than Io?</li>
+        <li>Design your own moon and tick off the goals.</li>
         <li>Why could a moon far from the Sun's habitable zone still have liquid water?</li>
       </ul>
       <h4>Simplified on purpose</h4>
       <ul>
         <li>Heat today is taken from measurements (Io about 10¹⁴ W; Enceladus about 16 GW, from Cassini) and scaled with the square of the eccentricity, as tidal heating theory gives. Europa's has never been measured: its 10¹² W is a typical model estimate, and some models give ten times less.</li>
+        <li>How well the tugs keep the orbit oval is judged from where the last {TUGS_REMEMBERED} landed. Real resonances work over a narrow range of rhythms like this, but through subtler orbital physics.</li>
+        <li>Your moon is Io-sized and its heat scales from Io's, as the square of the eccentricity and the distance to the power −7.5. The lines between volcanoes, a hidden ocean and frozen through are rough: they depend on what the moon is made of.</li>
         <li>Rounding off the orbit, or pumping it back up, takes a few seconds here. In reality it would take a very long time.</li>
-        <li>Orbits of the outer moons are drawn as circles and not to scale. The bulge is shown pointing straight at the planet; in reality it also rocks a little from side to side.</li>
+        <li>Orbits are drawn round and not to scale. The bulge is shown pointing straight at the planet; in reality it also rocks a little from side to side.</li>
       </ul>
     </>
   );
@@ -254,7 +382,7 @@ export function TidalSqueezeCanvas({ host }: Props): JSX.Element {
       logicalWidth={VIEW_W}
       logicalHeight={VIEW_H}
       canvasRef={sceneRef}
-      canvasLabel={`${moon.name} orbiting ${moon.planet} on a slightly oval orbit, kept oval by ${moon.partner}`}
+      canvasLabel={isYours ? "Your moon orbiting Jupiter" : `${moon.name} orbiting ${moon.planet} on a slightly oval orbit, tugged by ${moon.partner}`}
       toolbar={toolbar}
       controls={controls}
       controlsWidth={290}

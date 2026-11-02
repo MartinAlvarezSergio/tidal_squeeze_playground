@@ -113,3 +113,79 @@ export function angleAt(e: number, p: number): number {
   const turns = Math.floor(p);
   return 2 * Math.PI * turns + 2 * Math.atan2(Math.sqrt(1 + e) * Math.sin(E / 2), Math.sqrt(1 - e) * Math.cos(E / 2));
 }
+
+// ─── The rhythm: how well the partner's tugs line up ─────────────────────────
+
+/** Tugs counted when judging whether they keep landing in one place. */
+export const TUGS_REMEMBERED = 10;
+
+/**
+ * How far round the orbit (radians) each tug lands from the one before, when the partner takes
+ * `ratio` of the moon's orbits to go round once. Both start lined up at the moon's closest point.
+ */
+export function tugDrift(ratio: number): number {
+  // Orbits of the inner moon between one line-up and the next.
+  const between = ratio / (ratio - 1);
+  const turns = between - Math.round(between);
+  return 2 * Math.PI * turns;
+}
+
+/**
+ * How strongly the tugs add up, 0–1: 1 when they always land on the same spot (a resonance such as
+ * 2:1 or 3:2), near 0 when they are spread around the orbit and cancel.
+ */
+export function tugsLineUp(ratio: number): number {
+  const d = tugDrift(ratio);
+  const n = TUGS_REMEMBERED;
+  if (Math.abs(Math.sin(d / 2)) < 1e-9) {
+    return 1;
+  }
+  return Math.abs(Math.sin((n * d) / 2) / (n * Math.sin(d / 2)));
+}
+
+/** The resonance nearest to `ratio`, as "2:1" or "3:2", if the tugs line up there. */
+export function resonanceName(ratio: number): string | null {
+  for (const [p, q] of [
+    [2, 1],
+    [3, 2],
+    [5, 3],
+    [5, 2]
+  ]) {
+    if (Math.abs(ratio - p / q) < 0.06 && tugsLineUp(ratio) > 0.5) {
+      return `${p}:${q}`;
+    }
+  }
+  return null;
+}
+
+// ─── Your own moon ───────────────────────────────────────────────────────────
+
+/** Io's distance from Jupiter (km): the unit for your moon's distance. */
+export const IO_DISTANCE_KM = 421_700;
+
+/**
+ * Heat flow (W per square metre) from an Io-sized moon of Jupiter at `distance` (in Io's distances)
+ * on an orbit of eccentricity `e`, kept oval by a resonance. Tidal heating goes as e² and as
+ * distance to the −7.5.
+ */
+export function yourMoonFlow(distance: number, e: number): number {
+  const io = MOONS[0];
+  return heatFlow(io, io.forcedE) * (e / io.forcedE) ** 2 * distance ** -7.5;
+}
+
+export function yourMoonHeat(distance: number, e: number): number {
+  const r = MOONS[0].radiusKm * 1000;
+  return yourMoonFlow(distance, e) * 4 * Math.PI * r * r;
+}
+
+export type Inside = "frozen" | "ocean" | "volcanoes";
+
+/**
+ * What the heat does, roughly: Io's 2.4 W/m² melts rock into volcanoes; Europa's and Enceladus's
+ * few hundredths of a watt keep an ocean under the ice; much less and the inside freezes.
+ */
+export function insideAt(flow: number): Inside {
+  if (flow >= 0.5) return "volcanoes";
+  if (flow >= 0.01) return "ocean";
+  return "frozen";
+}

@@ -1,4 +1,4 @@
-/* Tidal squeeze: the orbit count in the top bar, and the hint under the resonance switch. */
+/* Tidal squeeze: the orbit count in the top bar, the hint under the rhythm slider, and the goals list. */
 
 .tidal-squeeze .ts-toolbar-orbits {
   padding: 0 6px;
@@ -13,4 +13,25 @@
   font-size: 12px;
   line-height: 1.4;
   color: rgba(240, 238, 234, 0.7);
+}
+
+.tidal-squeeze .ts-goals {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: rgba(240, 238, 234, 0.78);
+}
+
+.tidal-squeeze .ts-goals li {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: 6px;
+}
+
+.tidal-squeeze .ts-goals li.is-met {
+  color: #6fe39a;
 }
