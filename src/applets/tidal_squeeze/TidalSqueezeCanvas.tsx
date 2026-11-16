@@ -131,7 +131,8 @@ export function TidalSqueezeCanvas({ host }: Props): JSX.Element {
     let clock = 0;
     let lastUi = 0;
     const tick = (now: number): void => {
-      const dt = Math.min(0.1, (now - last) / 1000);
+      // The first frame can be stamped slightly before `last`; never step backwards.
+      const dt = Math.max(0, Math.min(0.1, (now - last) / 1000));
       last = now;
       clock += dt;
       const s = live.current;
